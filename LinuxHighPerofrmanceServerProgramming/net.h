@@ -16,5 +16,7 @@
 #include <fcntl.h>
 #include <sys/sendfile.h>
 
+#include <sys/epoll.h>
 
-#define MAX_BUFF_SIZE 512
+
+#define MAX_BUFF_SIZE 10

@@ -51,7 +51,7 @@ int main(int argc, char** argv)
 
         tv.tv_sec = 1;
         tv.tv_usec = 0;
-        ret = select(max_fd+1, &rdset, nullptr, nullptr, &tv);
+        ret = select(max_fd+1, &rdset, nullptr, nullptr, nullptr);
         if (ret < 0){
             if (ret == -1){
 

@@ -66,6 +66,7 @@ int main(int argc, char** argv)
         }
        
     }
+    shutdown( sock, SHUT_RD );
 
     close(sock);
     

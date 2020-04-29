@@ -33,9 +33,15 @@ private:
 public:
 
     static processpool< T >* create(int listenfd, int process_number = 8){
-        if (!m_instance)
+        if (!m_instance){
+            printf("%s\n", __FUNCTION__);
             m_instance = new processpool< T >(listenfd, process_number);
+        }
         return m_instance;
+    }
+    ~processpool(){
+        printf("%s\n", __FUNCTION__);
+        delete [] m_sub_process;
     }
     void run();
 private:
@@ -144,13 +150,13 @@ template<typename T>
 void processpool<T>::setup_sig_pipe(){
     /*创建epoll事件监听表和信号集合*/
     m_epollfd = epoll_create(22);
-    assert (epollfd != -1);
+    assert (m_epollfd != -1);
 
     int ret = socketpair( PF_UNIX, SOCK_STREAM, 0, sig_pipefd );
     assert (ret != -1);
 
     setnonblocking( sig_pipefd[1] );
-    addfs( m_epollfd, sig_pipefd[1] );
+    addfd( m_epollfd, sig_pipefd[1] );
     
     /*设置信号集函数*/
     addsig( SIGCHLD, sig_handler );
@@ -163,6 +169,7 @@ void processpool<T>::setup_sig_pipe(){
 /*父进程中m_id值为-1，子进程中m_id值大于等于0,我们据此判断接下来要运行的是父进程代码还是子进程代码*/
 template< typename T >
 void processpool<T>::run(){
+    printf("%s m_idx[%d]\n", __FUNCTION__, m_idx);
     if (m_idx != -1){
         run_child();
         return;
@@ -194,7 +201,7 @@ void processpool<T>::run_child(){
         }
         for (int i = 0; i < number; ++i){
             int sockfd = events[i].data.fd;
-            if ( sockfd == pipefd && events[i].event & EPOLLIN ){
+            if ( sockfd == pipefd && events[i].events & EPOLLIN ){
                 int client = 0;
                 /*从父、子进程之间的管道读取数据，并将结果保存在变量client中，如果读取成功，则表示有客户连接到来*/
                 ret = recv( sockfd, (char* )&client, sizeof client, 0);
@@ -214,7 +221,7 @@ void processpool<T>::run_child(){
                     * 以提高程序效率*/
                     users[connfd].init( m_epollfd, connfd, client_address );
                 }        
-            }else if (sockfd == sig_pipefd[0] && events[i].event & EPOLLIN){
+            }else if (sockfd == sig_pipefd[0] && events[i].events & EPOLLIN){
                 int sig;
                 char signal[1024];
                 ret = recv( sig_pipefd[0], signal, sizeof signal, 0);
@@ -243,7 +250,7 @@ void processpool<T>::run_child(){
                         }
                     }
                 }
-            }else if (events[i].event & EPOLLIN){
+            }else if (events[i].events & EPOLLIN){
                 users[sockfd].process();
             }else{
                 continue;
@@ -356,174 +363,5 @@ void processpool< T > :: run_parent() {
         }
     }
     close (m_epollfd);
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-int main(int argc, char** argv)
-{
-    if (argc <=2){
-        printf("uage: %s ip_address port_number\n", basename( argv[0] ));
-        return 1;
-    }
-    printf("main done!\n");
-    return 0;
 }
 

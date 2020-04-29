@@ -101,6 +101,7 @@ static void removefd( int epollfd, int fd ){
 static void sig_handler( int sig ){
     int save_errno = errno;
     int msg = sig;
+    printf("sig %d\n", sig);
     send(sig_pipefd[1], (char*)&msg, 1, 0);
     errno = save_errno;
 }
@@ -152,8 +153,9 @@ void processpool<T>::setup_sig_pipe(){
     m_epollfd = epoll_create(22);
     assert (m_epollfd != -1);
 
-    int ret = socketpair( PF_UNIX, SOCK_STREAM, 0, sig_pipefd );
+    int ret = socketpair( PF_UNIX, SOCK_STREAM, 0, sig_pipefd ); //在父子进程里都调用,各调用各自的全局变量sig_pipefd
     assert (ret != -1);
+    fprintf(stdout,"######sig_pipefd %p\n", sig_pipefd);
 
     setnonblocking( sig_pipefd[1] );
     addfd( m_epollfd, sig_pipefd[1] );
@@ -230,6 +232,7 @@ void processpool<T>::run_child(){
                 }else{
 
                     for (int j = 0; j < ret; ++j){
+                        fprintf(stdout,"child recv %d\n", signal[j]);
                         switch( signal[j] ){
                         case SIGCHLD:{
                                          pid_t  pid;
@@ -313,6 +316,7 @@ void processpool< T > :: run_parent() {
                 }
                 else{
                     for (int i = 0; i < ret; ++i){
+                        fprintf(stdout,"parent recv %d\n", signals[i]);
                         switch( signals[i] ){
                         case SIGCHLD:{
                                          pid_t pid;

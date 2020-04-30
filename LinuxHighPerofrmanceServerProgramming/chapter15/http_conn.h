@@ -137,7 +137,7 @@ private:
     METHOD m_method;
 
     /*客户请求的目标文件的完整路径,其内容等于doc_root + m_url, doc_root是网站根目录*/
-    char m_read_file[ FILENAME_LEN ];
+    char m_real_file[ FILENAME_LEN ];
     /*客户请求的目标文件名*/
     char* m_url;
     /*http协议版本号，我们仅支持http/1.1*/

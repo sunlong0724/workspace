@@ -4,7 +4,7 @@
 *sunlong0724@sina.com
 *Created Time: 2020年04月24日 星期五 10时05分03秒
  ************************************************************************/
-#include "net.h"
+#include "../net.h"
 
 #define BUFFER_SIZE 1024
 static const char* status_line[2] = {"200 OK", "500 Internal server error"};

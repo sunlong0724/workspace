@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <assert.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <string.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -18,6 +19,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include "locker.h"
+
 
 
 class http_conn
@@ -103,6 +105,7 @@ private:
     bool add_content( const char* content );
     bool add_status_line( int status, const char* title );
     bool add_headers( int content_length );
+    bool add_content_length( int content_length );
     bool add_linger();
     bool add_blank_line();
 

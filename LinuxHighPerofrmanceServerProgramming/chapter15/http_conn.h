@@ -91,7 +91,7 @@ private:
 
     /*下面这一组函数被process_read调用以分析http请求*/
     HTTP_CODE parse_request_line( char* text );
-    HTTP_CODE parse_header( char* text );
+    HTTP_CODE parse_headers( char* text );
     HTTP_CODE parse_content( char* text );
     HTTP_CODE do_request();
     char* get_line() { return m_read_buf + m_start_line; }

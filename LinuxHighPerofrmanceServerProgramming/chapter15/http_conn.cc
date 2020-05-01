@@ -89,14 +89,509 @@ void http_conn::init(){
 }
 
 
-
-int main(int argc, char** argv)
-{
-    if (argc <=2){
-        printf("uage: %s ip_address port_number\n", basename( argv[0] ));
-        return 1;
+/*从状态机，分析见8.6节*/
+http_conn::LINE_STATUS http_conn::parse_line(){
+    char temp;
+    for (; m_checked_idx < m_read_idx; ++m_checked_idx){
+        temp = m_read_buf [m_checked_idx ];
+        if ( temp == '\r'){
+            if (m_checked_idx + 1 == m_read_idx){
+                return LINE_STATUS::LINE_OPEN;
+            }else if (m_read_buf[ m_checked_idx + 1 ] == '\n'){
+                m_read_buf[ m_checked_idx++ ] = '\0';
+                m_read_buf[ m_checked_idx++ ] = '\0';
+                return LINE_STATUS::LINE_OK;
+            }
+            return LINE_STATUS::LINE_BAD;
+        }else if (temp == '\n'){
+            if (m_checked_idx > 1 && m_read_buf[ m_checked_idx - 1 ] == '\r'){
+                m_read_buf [ m_checked_idx - 1 ] = '\0';
+                m_read_buf [ m_checked_idx++ ] = '\0';
+                return LINE_STATUS::LINE_OK;
+            }
+            return LINE_STATUS::LINE_BAD;
+        }
     }
-    printf("main done!\n");
-    return 0;
+    return LINE_STATUS::LINE_OPEN;
 }
+
+
+/*循环读取客户端数据， 直到无数据可读或者对方关闭连接*/
+bool http_conn::read(){
+    if (m_read_idx >= READ_BUFFER_SIZE){
+        return false;
+    }
+    int byte_read = 0;
+    while( true ){
+        byte_read = recv( m_sockfd, m_read_buf + m_read_idx, READ_BUFFER_SIZE - m_read_idx, 0 );
+        if (byte_read == -1){
+            if (errno == EAGAIN || errno == EWOULDBLOCK){
+                break;
+            }
+            return false;
+        }else if ( byte_read == 0 ){
+            return false;
+        }
+
+        m_read_idx += byte_read;
+    }
+
+    return true;
+}
+
+/*解析http请求行，获得请求方法、目标url，以及http版本号*/
+http_conn::HTTP_CODE http_conn::parse_request_line( char* text ){
+
+    m_url = strpbrk ( text, " \t" );
+    if ( !m_url ){
+        return HTTP_CODE::BAD_REQUEST;
+    }
+    *m_url++ = '\0';
+    char* method = text;
+    if (strcasecmp( method, "GET" ) == 0){
+        m_method = METHOD::GET;
+    }else{
+        return HTTP_CODE::BAD_REQUEST;
+    }
+
+    m_url += strspn( m_url, " \t" );
+    m_version = strpbrk( m_url, " \t");
+    if ( !m_version ){
+        return HTTP_CODE::BAD_REQUEST;
+    }
+    *m_version++ = '\0';
+    m_version += strspn( m_version, " \t" );
+    if (strcasecmp( m_version, "HTTP/1.1" ) != 0){
+        return HTTP_CODE::BAD_REQUEST;
+    }
+    if (strncasecmp( m_url, "http://", 7 ) == 0){
+        m_url += 7;
+        m_url = strchr( m_url, '/' );
+    }
+    if ( !m_url || m_url[0] != '/' ){
+        return HTTP_CODE :: BAD_REQUEST;
+    }
+    
+    m_check_state = CHECK_STATE::CHECK_STATE_HEADER;
+    return HTTP_CODE::NO_REQUEST;
+}
+
+/*解析HTTP请求的一个头部信息*/
+http_conn::HTTP_CODE http_conn::parse_headers( char* text ){
+
+    /*遇到空行，表示头部字段解析完毕*/
+    if (text[ 0 ] == '\0'){
+        /*如果HTTP请求有消息体，则还需要读取m_content_length字节的消息体，状态机转移到CHECK_STATE_CONTENT状态*/
+        if ( m_content_length != 0 ){
+            m_check_state = CHECK_STATE::CHECK_STATE_CONTENT;
+            return HTTP_CODE::NO_REQUEST;
+        }
+        /*否则说明我们已经得到了一个完整的http请求*/
+        return HTTP_CODE::GET_REQUEST;
+    }
+    /*处理Connection头部字段*/
+    else if (strncasecmp ( text, "Connection:", 11 ) == 0){
+        text += 11;
+        text += strspn( text, " \t" );
+        if ( strcasecmp( text, "keep-alive" ) == 0 ){
+            m_linger = true;
+        }
+    }
+    /*处理Content-Length头部字段*/
+    else if ( strncasecmp( text, "Content-Length:", 15 ) == 0 ){
+        text += 15;
+        text += strspn( text, " \t" );
+        m_content_length = atoi( text );
+    }
+    /*处理Host头部字段*/
+    else if ( strncasecmp( text, "Host:", 5 ) == 0 ){
+        text += 5;
+        text += strspn( text, " \t" );
+        m_host = text;
+    }else {
+        printf( "oop! unknow header %s\n", text );
+    }
+
+    return HTTP_CODE::NO_REQUEST;
+}
+
+
+/*我们没有真正解析HTTP请求的消息体， 只是判断它是否被完整的装入了*/
+http_conn::HTTP_CODE http_conn::parse_content( char* text ){
+    if (m_read_idx >= m_content_length + m_checked_idx){
+        text[ m_content_length ] = '\0';
+        return HTTP_CODE::GET_REQUEST;
+    }
+    return HTTP_CODE::NO_REQUEST;
+}
+
+
+/*主状态机。其分析请参考8.6节。*/
+http_conn::HTTP_CODE http_conn::process_read(){
+    LINE_STATUS line_status = LINE_STATUS::LINE_OK;
+    HTTP_CODE ret = HTTP_CODE::NO_REQUEST;
+    char* text = 0;
+    while( m_check_state == CHECK_STATE::CHECK_STATE_CONTENT && line_status == LINE_STATUS::LINE_OK 
+           || (line_status = parse_line()) == LINE_STATUS::LINE_OK){
+        text == get_line();
+        m_start_line = m_checked_idx;
+        printf( "got 1 http line: %s\n", text );
+
+        switch( m_check_state ){
+        case CHECK_STATE::CHECK_STATE_REQUESTLINE:
+            {
+                ret = parse_request_line(  text );
+                if (ret == HTTP_CODE::BAD_REQUEST){
+                    return HTTP_CODE::BAD_REQUEST;
+                }
+                break;
+            }
+        case CHECK_STATE::CHECK_STATE_HEADER:
+            {
+                ret = parse_headers( text );
+                if (ret == HTTP_CODE::BAD_REQUEST){
+                    return HTTP_CODE::BAD_REQUEST;
+                }else if ( ret == HTTP_CODE::GET_REQUEST ){
+                    return do_request();
+                }
+                break;
+            }
+        case CHECK_STATE::CHECK_STATE_CONTENT:
+            {
+                ret = parse_content( text );
+                if (ret == HTTP_CODE::GET_REQUEST){
+                    return do_request();
+                }
+                line_status = LINE_STATUS::LINE_OPEN;
+                break;
+            }
+        default:
+            {
+                return HTTP_CODE::INTERNAL_ERROR;
+            }
+        }
+    }
+}
+
+/*当得到一个完整、正确的http请求时，我们就分析目标文件的属性。如果目标文件存在、对所有用户可读，
+ * 且不是目录，则使用mmap将其映射到内存地址m_file_address处，并告诉调用者获取文件成功。*/
+http_conn::HTTP_CODE http_conn::do_request(){
+    strcpy( m_real_file, doc_root );
+    int len = strlen( doc_root );
+    strncpy( m_real_file + len, m_url, FILENAME_LEN - len -1 );
+        if ( stat( m_real_file, &m_file_stat ) < 0 ){
+            return HTTP_CODE::NO_RESOURCE;
+        }
+        if (! (m_file_stat.st_mode & S_IROTH)){
+            return HTTP_CODE::FORBIDDEN_REQUEST;
+        }
+        if (S_ISDIR( m_file_stat.st_mode )){
+            return HTTP_CODE::BAD_REQUEST;
+        }
+
+        int fd = open( m_real_file, O_RDONLY );
+        m_file_address = (char*)mmap( 0, m_file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        close( fd );
+        return HTTP_CODE::FILE_REQUEST;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

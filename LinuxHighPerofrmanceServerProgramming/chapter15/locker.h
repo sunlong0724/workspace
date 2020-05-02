@@ -4,7 +4,8 @@
 *sunlong0724@sina.com
 *Created Time: 2020年04月29日 星期三 21时17分10秒
  ************************************************************************/
-#pragma once
+#ifndef __LOCKER_H__
+#define __LOCKER_H__
 
 #include <exception>
 #include <pthread.h>
@@ -93,3 +94,4 @@ private:
     pthread_cond_t m_cond;
 };
 
+#endif
